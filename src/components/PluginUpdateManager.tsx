@@ -1,4 +1,4 @@
-import { Platform } from 'obsidian';
+import { App, Platform } from 'obsidian';
 import * as React from 'react';
 import { PluginSettings } from '../domain/pluginSettings';
 import { useAppSelector } from '../state';
@@ -6,6 +6,7 @@ import PluginUpdateList from './PluginUpdateList';
 import PluginUpdateProgressTracker from './PluginUpdateProgressTracker';
 
 interface PluginUpdateManagerProps {
+    app: App;
     titleEl: HTMLElement | undefined;
     persistPluginSettings: (settings: PluginSettings) => Promise<void>;
     closeObsidianTab: () => void;
@@ -15,6 +16,7 @@ const ACTION_BAR_LOCATION_MIDDLE =
     process.env['OBSIDIAN_APP_ACTION_BAR_LOCATION_MIDDLE'] === 'true';
 
 const PluginUpdateManager: React.FC<PluginUpdateManagerProps> = ({
+    app,
     titleEl,
     persistPluginSettings,
     closeObsidianTab,
@@ -34,6 +36,7 @@ const PluginUpdateManager: React.FC<PluginUpdateManagerProps> = ({
     } else {
         return (
             <PluginUpdateList
+                app={app}
                 titleEl={titleEl}
                 persistPluginSettings={persistPluginSettings}
                 closeObsidianTab={closeObsidianTab}

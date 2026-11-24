@@ -6,11 +6,13 @@
   "scripts": {
     "setup": "sh scripts/repo-setup.sh",
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/deploy.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "test": "jest",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
     "storybook": "sh scripts/run-storybook.sh",
     "build-storybook": "build-storybook",
-    "downgrade-self": "sh scripts/change-plugin-version.sh obsidian-plugin-update-tracker 0.0.0"
+    "downgrade-self": "sh scripts/change-plugin-version.sh plugin-update-tracker-custom 0.0.0"
   },
   "keywords": [],
   "author": "",

@@ -3,6 +3,10 @@ import find from 'lodash/find';
 import { App, PluginManifest } from 'obsidian';
 import { DEFAULT_PLUGIN_SETTINGS, PluginSettings } from '../domain/pluginSettings';
 import { dismissSelectedPluginVersions } from './actionProducers/dismissPluginVersions';
+import {
+    checkAllPluginsSecurityWithJev,
+    checkPluginSecurityWithJev,
+} from './actionProducers/checkPluginSecurity';
 import { updatePlugins } from './actionProducers/updatePlugins';
 
 export type ObsidianApp = App & {
@@ -31,6 +35,8 @@ export type ObsidianState = {
     pluginUpdateProgress: PluginUpdateResult[];
     isUpdateResultAcknowledged: boolean;
     githubRateLimitResetTimestamp?: number;
+    checkingSecurityByPluginId: Record<string, boolean>;
+    isCheckingAllSecurity: boolean;
 };
 
 const DEFAULT_STATE: ObsidianState = {
@@ -42,6 +48,8 @@ const DEFAULT_STATE: ObsidianState = {
     isUpdatingPlugins: false,
     pluginUpdateProgress: [],
     isUpdateResultAcknowledged: true,
+    checkingSecurityByPluginId: {},
+    isCheckingAllSecurity: false,
 };
 
 export type PluginUpdateResult = {
@@ -131,6 +139,24 @@ const obsidianStateSlice = createSlice({
                     state.selectedPluginsById[dismissedVersion.pluginId] =
                         !dismissedVersion.isLastAvailableVersion;
                 }
+            })
+            .addCase(checkPluginSecurityWithJev.pending, (state, action) => {
+                state.checkingSecurityByPluginId[action.meta.arg.pluginId] = true;
+            })
+            .addCase(checkPluginSecurityWithJev.fulfilled, (state, action) => {
+                delete state.checkingSecurityByPluginId[action.meta.arg.pluginId];
+            })
+            .addCase(checkPluginSecurityWithJev.rejected, (state, action) => {
+                delete state.checkingSecurityByPluginId[action.meta.arg.pluginId];
+            })
+            .addCase(checkAllPluginsSecurityWithJev.pending, (state) => {
+                state.isCheckingAllSecurity = true;
+            })
+            .addCase(checkAllPluginsSecurityWithJev.fulfilled, (state) => {
+                state.isCheckingAllSecurity = false;
+            })
+            .addCase(checkAllPluginsSecurityWithJev.rejected, (state) => {
+                state.isCheckingAllSecurity = false;
             });
     },
 });

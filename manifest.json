@@ -1,10 +1,10 @@
 {
-	"id": "obsidian-plugin-update-tracker",
-	"name": "Plugin Update Tracker",
+	"id": "plugin-update-tracker-custom",
+	"name": "Plugin Update Tracker (Custom)",
 	"version": "1.7.0",
 	"minAppVersion": "0.15.0",
-	"description": "Know when installed plugins have updates and evaluate the risk of upgrading",
-	"author": "Obsidian",
+	"description": "Track plugin updates, inspect source diffs with Jev AI security checks, and enforce an approval checklist before updating.",
+	"author": "swar8080 (customized by Rose)",
 	"authorUrl": "https://github.com/swar8080/obsidian-plugin-update-tracker",
 	"isDesktopOnly": false
 }

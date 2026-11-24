@@ -9,16 +9,23 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import find from 'lodash/find';
 import isEmpty from 'lodash/isEmpty';
 import * as React from 'react';
+import { App, Notice } from 'obsidian';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import styled from 'styled-components';
 import { visit } from 'unist-util-visit';
 import InstalledPluginReleases from '../domain/InstalledPluginReleases';
-import { PluginSettings } from '../domain/pluginSettings';
+import { PluginSecurityReview, PluginSettings } from '../domain/pluginSettings';
 import enrichReleaseNotes from '../domain/releaseNoteEnricher';
 import { groupById } from '../domain/util/groupById';
 import { useAppDispatch, useAppSelector } from '../state';
+import {
+    checkAllPluginsSecurityWithJev,
+    checkPluginSecurityWithJev,
+    syncSecurityChecklistFromVault,
+    togglePluginSecurityApproval,
+} from '../state/actionProducers/checkPluginSecurity';
 import {
     dismissSelectedPluginVersions,
     PluginVersionsToDismiss,
@@ -29,10 +36,16 @@ import { countSelectedPlugins } from '../state/selectors/countSelectedPlugins';
 import { getSelectedPluginIds } from '../state/selectors/getSelectedPluginIds';
 import { NewTextFadeInThenOutAnimation } from './common/NewTextFadeOutThenInAnimation';
 import usePluginReleaseFilter from './hooks/usePluginReleaseFilter';
+import {
+    PluginSecurityPanel,
+    SecurityChecklistToolbar,
+    SecurityStatusBadge,
+} from './PluginSecurityPanel';
 import SelectedPluginActionBar from './SelectedPluginActionBar';
 dayjs.extend(relativeTime);
 
 interface PluginUpdateListProps {
+    app: App;
     titleEl: HTMLElement | undefined;
     persistPluginSettings: (settings: PluginSettings) => Promise<void>;
     closeObsidianTab: () => void;
@@ -42,6 +55,7 @@ interface PluginUpdateListProps {
 type ActionBarLocation = 'bottom' | 'middle';
 
 const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
+    app,
     titleEl,
     persistPluginSettings,
     closeObsidianTab,
@@ -50,12 +64,34 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
     const allPluginReleases: InstalledPluginReleases[] = usePluginReleaseFilter();
     const isLoadingReleases = useAppSelector((state) => state.releases.isLoadingReleases);
     const enabledPlugins = useAppSelector((state) => state.obsidian.enabledPlugins) || {};
+    const settings = useAppSelector((state) => state.obsidian.settings);
+    const checkingSecurityByPluginId = useAppSelector(
+        (state) => state.obsidian.checkingSecurityByPluginId
+    );
+    const isCheckingAllSecurity = useAppSelector((state) => state.obsidian.isCheckingAllSecurity);
     const selectedPluginsById = useAppSelector(getSelectedPluginIds);
     const selectedPluginCount = useAppSelector(countSelectedPlugins);
     const isUpdatingDismissedVersions = useAppSelector(
         (state) => state.releases.isUpdatingDismissedVersions
     );
     const dispatch = useAppDispatch();
+    const didInitialChecklistSync = React.useRef(false);
+
+    React.useEffect(() => {
+        if (
+            !didInitialChecklistSync.current &&
+            settings.syncMarkdownChecklist &&
+            allPluginReleases.length > 0
+        ) {
+            didInitialChecklistSync.current = true;
+            void dispatch(
+                syncSecurityChecklistFromVault({
+                    app,
+                    persistPluginSettings,
+                })
+            );
+        }
+    }, [app, allPluginReleases.length, dispatch, persistPluginSettings, settings.syncMarkdownChecklist]);
 
     React.useEffect(() => {
         if (!isLoadingReleases && allPluginReleases.length === 0) {
@@ -84,6 +120,33 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
     }
 
     function handleClickInstall(): Promise<any> {
+        if (settings.requireApprovalBeforeUpdate) {
+            const targetVersionById = allPluginReleases.reduce((acc, next) => {
+                acc[next.getPluginId()] = next.getLatestVersionNumber();
+                return acc;
+            }, {} as Record<string, string>);
+
+            const unapprovedIds = selectedPluginsById.filter((pluginId) => {
+                const review = settings.securityReviewsByPluginId[pluginId];
+                return (
+                    !review?.approved || review.reviewedVersion !== targetVersionById[pluginId]
+                );
+            });
+
+            if (unapprovedIds.length > 0) {
+                const nameById = allPluginReleases.reduce((acc, next) => {
+                    acc[next.getPluginId()] = next.getPluginName();
+                    return acc;
+                }, {} as Record<string, string>);
+                const unapprovedNames = unapprovedIds.map((id) => nameById[id] || id).join(', ');
+                new Notice(
+                    `Blocked update: check with Jev or approve these plugins first: ${unapprovedNames}`,
+                    8000
+                );
+                return Promise.reject(new Error('Unapproved plugin updates selected'));
+            }
+        }
+
         const visiblePluginVersionsById = allPluginReleases.reduce((combined, next) => {
             //getLatestVersionNumber is the latest version that isn't ignored or filtered-out
             combined[next.getPluginId()] = next.getLatestVersionNumber();
@@ -91,6 +154,65 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
         }, {} as Record<string, string>);
 
         return dispatch(updatePlugins({ visiblePluginVersionsById }));
+    }
+
+    function handleCheckPluginWithJev(pluginId: string) {
+        void dispatch(
+            checkPluginSecurityWithJev({
+                pluginId,
+                app,
+                persistPluginSettings,
+            })
+        );
+    }
+
+    function handleCheckAllWithJev() {
+        const uncheckedIds = allPluginReleases
+            .filter((item) => {
+                const review = settings.securityReviewsByPluginId[item.getPluginId()];
+                return !review || review.reviewedVersion !== item.getLatestVersionNumber() || Boolean(review.error);
+            })
+            .map((item) => item.getPluginId());
+
+        if (uncheckedIds.length === 0) return;
+        void dispatch(
+            checkAllPluginsSecurityWithJev({
+                pluginIds: uncheckedIds,
+                app,
+                persistPluginSettings,
+            })
+        );
+    }
+
+    function handleTogglePluginApproved(
+        plugin: PluginViewModel,
+        nextApproved: boolean
+    ) {
+        const compareUrl = plugin.githubRepositoryUrl
+            ? `${plugin.githubRepositoryUrl}/compare/${plugin.installedVersionNumber}...${plugin.latestInstallableVersionNumber}#files_bucket`
+            : '';
+        void dispatch(
+            togglePluginSecurityApproval({
+                pluginId: plugin.id,
+                fromVersion: plugin.installedVersionNumber,
+                version: plugin.latestInstallableVersionNumber,
+                compareUrl,
+                approved: nextApproved,
+                app,
+                persistPluginSettings,
+            })
+        );
+    }
+
+    function handleSyncChecklist() {
+        void dispatch(
+            syncSecurityChecklistFromVault({
+                app,
+                persistPluginSettings,
+            })
+        ).then(() => {
+            new Notice('Synced plugin security checklist note.');
+        });
     }
 
     async function handleDismissPluginVersions(): Promise<void> {
@@ -148,6 +270,16 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
             handleToggleSelectAll={handleToggleSelectAll}
             handleInstall={handleClickInstall}
             handleClickDismissPluginVersions={handleDismissPluginVersions}
+            securityReviewsByPluginId={settings.securityReviewsByPluginId}
+            checkingSecurityByPluginId={checkingSecurityByPluginId}
+            isCheckingAllSecurity={isCheckingAllSecurity}
+            hasTypesafeApiKey={Boolean(settings.typesafeApiKey.trim())}
+            syncMarkdownChecklist={settings.syncMarkdownChecklist}
+            requireApprovalBeforeUpdate={settings.requireApprovalBeforeUpdate}
+            onCheckPluginWithJev={handleCheckPluginWithJev}
+            onCheckAllWithJev={handleCheckAllWithJev}
+            onTogglePluginApproved={handleTogglePluginApproved}
+            onSyncChecklist={handleSyncChecklist}
         />
     );
 };
@@ -163,6 +295,16 @@ export const PluginUpdateList: React.FC<{
     handleInstall: () => Promise<any>;
     isUpdatingDismissedVersions: boolean;
     handleClickDismissPluginVersions: () => any;
+    securityReviewsByPluginId?: Record<string, PluginSecurityReview>;
+    checkingSecurityByPluginId?: Record<string, boolean>;
+    isCheckingAllSecurity?: boolean;
+    hasTypesafeApiKey?: boolean;
+    syncMarkdownChecklist?: boolean;
+    requireApprovalBeforeUpdate?: boolean;
+    onCheckPluginWithJev?: (pluginId: string) => void;
+    onCheckAllWithJev?: () => void;
+    onTogglePluginApproved?: (plugin: PluginViewModel, approved: boolean) => void;
+    onSyncChecklist?: () => void;
 }> = ({
     plugins,
     isInitiallyExpanded,
@@ -174,6 +316,16 @@ export const PluginUpdateList: React.FC<{
     handleInstall,
     isUpdatingDismissedVersions,
     handleClickDismissPluginVersions,
+    securityReviewsByPluginId = {},
+    checkingSecurityByPluginId = {},
+    isCheckingAllSecurity = false,
+    hasTypesafeApiKey = false,
+    syncMarkdownChecklist = false,
+    requireApprovalBeforeUpdate = true,
+    onCheckPluginWithJev,
+    onCheckAllWithJev,
+    onTogglePluginApproved,
+    onSyncChecklist,
 }) => {
     /**
      * Keeps track of latest update time of each plugin, remembering the update time of versions that are dismissed.
@@ -239,8 +391,42 @@ export const PluginUpdateList: React.FC<{
     const selectAllTitle = isSelectAllChecked ? 'Deselect All' : 'Select All';
     const isDisabled = isUpdatingDismissedVersions;
 
+    const approvedCount = plugins.filter((plugin) => {
+        const review = securityReviewsByPluginId[plugin.id];
+        return Boolean(review?.approved) && review?.reviewedVersion === plugin.latestInstallableVersionNumber;
+    }).length;
+    const uncheckedCount = plugins.filter((plugin) => {
+        const review = securityReviewsByPluginId[plugin.id];
+        return (
+            !review ||
+            review.reviewedVersion !== plugin.latestInstallableVersionNumber ||
+            Boolean(review.error)
+        );
+    }).length;
+    const totalEstimatedUsd = plugins.reduce((sum, plugin) => {
+        const review = securityReviewsByPluginId[plugin.id];
+        if (review && review.reviewedVersion === plugin.latestInstallableVersionNumber) {
+            return sum + (review.estimatedUsd || 0);
+        }
+        return sum;
+    }, 0);
+
     return (
         <>
+            {onCheckAllWithJev && plugins.length > 0 && (
+                <SecurityChecklistToolbar
+                    totalPlugins={plugins.length}
+                    approvedCount={approvedCount}
+                    uncheckedCount={uncheckedCount}
+                    totalEstimatedUsd={totalEstimatedUsd}
+                    isCheckingAll={isCheckingAllSecurity}
+                    hasApiKey={hasTypesafeApiKey}
+                    syncChecklistEnabled={syncMarkdownChecklist}
+                    requireApproval={requireApprovalBeforeUpdate}
+                    onCheckAllWithJev={onCheckAllWithJev}
+                    onSyncChecklist={onSyncChecklist || (() => {})}
+                />
+            )}
             {plugins.length > 1 && (
                 <DivSelectAll>
                     <input
@@ -263,6 +449,19 @@ export const PluginUpdateList: React.FC<{
                         isSelectionDisabled={isDisabled}
                         selected={selectedPluginIdsSet.has(plugin.id)}
                         onToggleSelectedClicked={(e) => handleToggleSelectedClicked(plugin.id, e)}
+                        securityReview={securityReviewsByPluginId[plugin.id]}
+                        isCheckingSecurity={Boolean(checkingSecurityByPluginId[plugin.id])}
+                        isCheckingAllSecurity={isCheckingAllSecurity}
+                        onCheckWithJev={
+                            onCheckPluginWithJev
+                                ? () => onCheckPluginWithJev(plugin.id)
+                                : undefined
+                        }
+                        onToggleApproved={
+                            onTogglePluginApproved
+                                ? (approved) => onTogglePluginApproved(plugin, approved)
+                                : undefined
+                        }
                     />
                 ))}
             </DivPluginUpdateListContainer>
@@ -308,7 +507,23 @@ const PluginUpdates: React.FC<{
     isSelectionDisabled: boolean;
     selected: boolean;
     onToggleSelectedClicked: (e: React.SyntheticEvent) => void;
-}> = ({ plugin, isInitiallyExpanded, isSelectionDisabled, selected, onToggleSelectedClicked }) => {
+    securityReview?: PluginSecurityReview;
+    isCheckingSecurity?: boolean;
+    isCheckingAllSecurity?: boolean;
+    onCheckWithJev?: () => void;
+    onToggleApproved?: (approved: boolean) => void;
+}> = ({
+    plugin,
+    isInitiallyExpanded,
+    isSelectionDisabled,
+    selected,
+    onToggleSelectedClicked,
+    securityReview,
+    isCheckingSecurity = false,
+    isCheckingAllSecurity = false,
+    onCheckWithJev,
+    onToggleApproved,
+}) => {
     const [isReleaseNotesExpanded, setIsReleaseNotesExpanded] = React.useState(isInitiallyExpanded);
     const hasReleaseNotes =
         find(plugin.releaseNotes, (releaseNote) => !isEmpty(releaseNote.notes)) != null;
@@ -341,6 +556,13 @@ const PluginUpdates: React.FC<{
                         >
                             Disabled
                         </SpanDisabledPlugin>
+                    )}
+                    {onCheckWithJev && (
+                        <SecurityStatusBadge
+                            review={securityReview}
+                            targetVersion={plugin.latestInstallableVersionNumber}
+                            isChecking={isCheckingSecurity}
+                        />
                     )}
                 </H2PluginName>
                 <DivSelectPluginContainer>
@@ -378,6 +600,17 @@ const PluginUpdates: React.FC<{
                     </a>
                 </DivGitDiff>
             </DivReleaseSummaryContainer>
+            {onCheckWithJev && onToggleApproved && (
+                <PluginSecurityPanel
+                    pluginId={plugin.id}
+                    targetVersion={plugin.latestInstallableVersionNumber}
+                    review={securityReview}
+                    isChecking={isCheckingSecurity}
+                    isBusyAll={isCheckingAllSecurity}
+                    onCheckWithJev={onCheckWithJev}
+                    onToggleApproved={onToggleApproved}
+                />
+            )}
             <DivReleaseNotesContainer>
                 <DivExpandNotesContainer hasReleaseNotes={hasReleaseNotes}>
                     <FontAwesomeIcon

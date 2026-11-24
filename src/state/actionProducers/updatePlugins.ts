@@ -34,6 +34,8 @@ export const updatePlugins = createAsyncThunk(
         }, {} as Record<string, InstalledPluginReleases>);
 
         const selectedPluginIds = getSelectedPluginIds(state);
+        const requireApproval = state.obsidian.settings.requireApprovalBeforeUpdate;
+        const securityReviews = state.obsidian.settings.securityReviewsByPluginId;
 
         let isRateLimited = false;
         for (const pluginId of selectedPluginIds) {
@@ -45,6 +47,22 @@ export const updatePlugins = createAsyncThunk(
             const isPluginEnabled =
                 state.obsidian.enabledPlugins != null && state.obsidian.enabledPlugins[pluginId];
             const isUpdatingThisPlugin = pluginId === state.obsidian.thisPluginId;
+
+            if (requireApproval) {
+                const review = securityReviews[pluginId];
+                const isApprovedForVersion =
+                    Boolean(review?.approved) && review?.reviewedVersion === versionToInstall;
+                if (!isApprovedForVersion) {
+                    dispatch(
+                        pluginUpdateStatusChange({
+                            pluginId,
+                            pluginName: installedPlugin.getPluginName(),
+                            status: 'failure',
+                        })
+                    );
+                    continue;
+                }
+            }
 
             let success: boolean;
             let didDisable = false;

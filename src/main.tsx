@@ -22,7 +22,13 @@ import RibbonIcon from './components/RibbonIcon';
 import UpdateStatusIcon from './components/UpdateStatusIcon';
 import initiatePluginSettings from './domain/initiatePluginSettings';
 import pluginFilter from './domain/pluginFilter';
-import { DEFAULT_PLUGIN_SETTINGS, PluginSettings } from './domain/pluginSettings';
+import {
+    DEFAULT_CHECKLIST_NOTE_PATH,
+    DEFAULT_JEV_ENDPOINT_URL,
+    DEFAULT_JEV_MODEL,
+    DEFAULT_PLUGIN_SETTINGS,
+    PluginSettings,
+} from './domain/pluginSettings';
 import { RESET_ACTION, store } from './state';
 import { cleanupDismissedPluginVersions } from './state/actionProducers/cleanupDismissedPluginVersions';
 import { fetchReleases } from './state/actionProducers/fetchReleases';
@@ -328,6 +334,7 @@ class PluginUpdateManagerView extends ItemView {
         this.rootComponent = renderRootComponent(
             container,
             <PluginUpdateManager
+                app={this.plugin.app}
                 titleEl={titleEl}
                 persistPluginSettings={async (settings) => await this.plugin.saveSettings(settings)}
                 closeObsidianTab={() => this.closeThisTab()}
@@ -491,6 +498,135 @@ class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
                 'https://github.com/swar8080/obsidian-plugin-update-tracker#custom-css-snippets';
             a.style.fontSize = 'var(--font-smallest)';
         });
+
+        new Setting(containerEl).setName('Jev security & checklist').setHeading();
+
+        new Setting(containerEl)
+            .setName('TypeSafe API key')
+            .setDesc(
+                'Stored in this plugin’s local data.json (avoid syncing .obsidian/plugins if you do not want this key synced).'
+            )
+            .addText((text) => {
+                text.inputEl.type = 'password';
+                text.setPlaceholder('Enter TypeSafe API key')
+                    .setValue(this.plugin.settings.typesafeApiKey)
+                    .onChange(async (value) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            typesafeApiKey: value.trim(),
+                        });
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName('Require approval before updating')
+            .setDesc(
+                'Block plugin updates until the target version is approved via Jev check or checklist.'
+            )
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.requireApprovalBeforeUpdate)
+                    .onChange(async (requireApprovalBeforeUpdate) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            requireApprovalBeforeUpdate,
+                        });
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Auto-approve low-risk Jev checks')
+            .setDesc(
+                'Automatically mark updates approved when a full GitHub diff is available and Jev returns approve with risk <= 0.75.'
+            )
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.autoApproveLowRiskUpdates)
+                    .onChange(async (autoApproveLowRiskUpdates) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            autoApproveLowRiskUpdates,
+                        });
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Sync Markdown checklist note')
+            .setDesc(
+                'Maintain a vault checklist note so you or an AI agent can inspect and check off [x] approved updates.'
+            )
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.syncMarkdownChecklist)
+                    .onChange(async (syncMarkdownChecklist) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            syncMarkdownChecklist,
+                        });
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Checklist note path')
+            .setDesc('Vault path for the synced Markdown security checklist note.')
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_CHECKLIST_NOTE_PATH)
+                    .setValue(this.plugin.settings.checklistNotePath)
+                    .onChange(async (value) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            checklistNotePath: value.trim() || DEFAULT_CHECKLIST_NOTE_PATH,
+                        });
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Jev model')
+            .setDesc('TypeSafe System One model identifier.')
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_JEV_MODEL)
+                    .setValue(this.plugin.settings.jevModel)
+                    .onChange(async (value) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            jevModel: value.trim() || DEFAULT_JEV_MODEL,
+                        });
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Jev endpoint URL')
+            .setDesc('System One API endpoint used for security diff evaluations.')
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_JEV_ENDPOINT_URL)
+                    .setValue(this.plugin.settings.jevEndpointUrl)
+                    .onChange(async (value) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            jevEndpointUrl: value.trim() || DEFAULT_JEV_ENDPOINT_URL,
+                        });
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('GitHub token (optional)')
+            .setDesc(
+                'Optional personal access token to increase GitHub Compare API rate limits from 60 to 5,000 requests/hour.'
+            )
+            .addText((text) => {
+                text.inputEl.type = 'password';
+                text.setPlaceholder('Optional GitHub PAT')
+                    .setValue(this.plugin.settings.githubToken)
+                    .onChange(async (value) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            githubToken: value.trim(),
+                        });
+                    });
+            });
 
         containerEl.createEl('h2', { text: 'Restore Ignored Plugin Versions' });
         const dismissedPluginVersionsDiv = containerEl.createDiv();

@@ -16,6 +16,7 @@ describe('initiatePluginSettings', () => {
 
     test('loading saved settings', () => {
         const savedSettings: PluginSettings = {
+            ...DEFAULT_PLUGIN_SETTINGS,
             daysToSuppressNewUpdates: DEFAULT_PLUGIN_SETTINGS.daysToSuppressNewUpdates + 1,
             dismissedVersionsByPluginId: {
                 plugin1: {
@@ -36,6 +37,20 @@ describe('initiatePluginSettings', () => {
         const settings = initiatePluginSettings(savedSettings);
 
         expect(settings).toEqual(savedSettings);
+    });
+
+    test('fills Jev security defaults when loading legacy saved settings', () => {
+        const legacySaved: Partial<PluginSettings> = {
+            daysToSuppressNewUpdates: 3,
+            showNotificationOnNewUpdate: true,
+        };
+
+        const settings = initiatePluginSettings(legacySaved);
+
+        expect(settings.daysToSuppressNewUpdates).toBe(3);
+        expect(settings.requireApprovalBeforeUpdate).toBe(true);
+        expect(settings.syncMarkdownChecklist).toBe(true);
+        expect(settings.securityReviewsByPluginId).toEqual({});
     });
 
     describe('migrating hideIconIfNoUpdatesAvailable', () => {
