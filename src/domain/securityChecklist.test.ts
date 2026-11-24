@@ -55,6 +55,7 @@ describe('securityChecklist', () => {
             },
         ]);
 
+        expect(md).not.toContain('# Plugin Update Security Checklist');
         const parsed = parseSecurityChecklistMarkdown(md);
         expect(parsed['dataview']).toEqual({
             pluginId: 'dataview',

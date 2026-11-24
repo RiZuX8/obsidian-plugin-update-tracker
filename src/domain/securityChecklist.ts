@@ -62,8 +62,6 @@ export function renderSecurityChecklistMarkdown(entries: ChecklistRenderEntry[])
     const sorted = [...entries].sort((a, b) => a.pluginId.localeCompare(b.pluginId));
 
     const header = [
-        '# Plugin Update Security Checklist',
-        '',
         'Pending Obsidian plugin updates tracked by **Plugin Update Tracker (Custom)**.',
         'Check (`[x]`) an item here or in the plugin UI to allow updating that version.',
         '',

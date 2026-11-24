@@ -1,6 +1,7 @@
 import debounce from 'lodash/debounce';
 import difference from 'lodash/difference';
 import {
+    AbstractInputSuggest,
     AbstractTextComponent,
     App,
     ItemView,
@@ -16,6 +17,7 @@ import {
 import * as React from 'react';
 import * as ReactDOM from 'react-dom/client';
 import { Provider } from 'react-redux';
+import { ChecklistPathSuggest } from './components/ChecklistPathSuggest';
 import DismissedPluginVersions from './components/DismissedPluginVersions';
 import PluginUpdateManager from './components/PluginUpdateManager';
 import RibbonIcon from './components/RibbonIcon';
@@ -353,9 +355,12 @@ class PluginUpdateManagerView extends ItemView {
     }
 }
 
+const PRESET_JEV_MODELS = ['jev-latest', 'jev-1.14.0'] as const;
+
 class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
     private plugin: PluginUpdateCheckerPlugin;
     private dismissedVersionsRootComponent: ReactDOM.Root | undefined;
+    private isCustomJevModelSelected: boolean = false;
 
     constructor(app: App, plugin: PluginUpdateCheckerPlugin) {
         super(app, plugin);
@@ -364,6 +369,11 @@ class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
 
     display(): void {
         let { containerEl } = this;
+
+        if (this.dismissedVersionsRootComponent) {
+            this.dismissedVersionsRootComponent.unmount();
+            this.dismissedVersionsRootComponent = undefined;
+        }
 
         containerEl.empty();
 
@@ -569,32 +579,74 @@ class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName('Checklist note path')
             .setDesc('Vault path for the synced Markdown security checklist note.')
-            .addText((text) =>
-                text
-                    .setPlaceholder(DEFAULT_CHECKLIST_NOTE_PATH)
-                    .setValue(this.plugin.settings.checklistNotePath)
-                    .onChange(async (value) => {
-                        await this.plugin.saveSettings({
-                            ...this.plugin.settings,
-                            checklistNotePath: value.trim() || DEFAULT_CHECKLIST_NOTE_PATH,
-                        });
-                    })
-            );
+            .addText((text) => {
+                text.setPlaceholder(DEFAULT_CHECKLIST_NOTE_PATH).setValue(
+                    this.plugin.settings.checklistNotePath
+                );
+
+                const savePath = async (value: string) => {
+                    await this.plugin.saveSettings({
+                        ...this.plugin.settings,
+                        checklistNotePath: value.trim() || DEFAULT_CHECKLIST_NOTE_PATH,
+                    });
+                };
+
+                if (typeof AbstractInputSuggest === 'function') {
+                    new ChecklistPathSuggest(this.app, text.inputEl, (selectedPath) => {
+                        text.setValue(selectedPath);
+                        void savePath(selectedPath);
+                    });
+                }
+
+                text.onChange(savePath);
+            });
+
+        const currentJevModel = this.plugin.settings.jevModel || DEFAULT_JEV_MODEL;
+        const isPresetModel = PRESET_JEV_MODELS.includes(
+            currentJevModel as (typeof PRESET_JEV_MODELS)[number]
+        );
+        const showCustomModelInput = this.isCustomJevModelSelected || !isPresetModel;
 
         new Setting(containerEl)
             .setName('Jev model')
-            .setDesc('TypeSafe System One model identifier.')
-            .addText((text) =>
-                text
-                    .setPlaceholder(DEFAULT_JEV_MODEL)
-                    .setValue(this.plugin.settings.jevModel)
+            .setDesc('Choose jev-latest, a pinned Jev version, or a custom model ID.')
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption('jev-latest', 'jev-latest (Latest)')
+                    .addOption('jev-1.14.0', 'jev-1.14.0')
+                    .addOption('custom', 'Custom model...')
+                    .setValue(showCustomModelInput ? 'custom' : currentJevModel)
                     .onChange(async (value) => {
+                        if (value === 'custom') {
+                            this.isCustomJevModelSelected = true;
+                            this.display();
+                            return;
+                        }
+                        this.isCustomJevModelSelected = false;
                         await this.plugin.saveSettings({
                             ...this.plugin.settings,
-                            jevModel: value.trim() || DEFAULT_JEV_MODEL,
+                            jevModel: value,
                         });
+                        this.display();
                     })
             );
+
+        if (showCustomModelInput) {
+            new Setting(containerEl)
+                .setName('Custom Jev model ID')
+                .setDesc('Model identifier sent to the System One endpoint.')
+                .addText((text) =>
+                    text
+                        .setPlaceholder('jev-latest')
+                        .setValue(this.plugin.settings.jevModel)
+                        .onChange(async (value) => {
+                            await this.plugin.saveSettings({
+                                ...this.plugin.settings,
+                                jevModel: value.trim() || DEFAULT_JEV_MODEL,
+                            });
+                        })
+                );
+        }
 
         new Setting(containerEl)
             .setName('Jev endpoint URL')
@@ -641,6 +693,7 @@ class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
     hide() {
         if (this.dismissedVersionsRootComponent) {
             this.dismissedVersionsRootComponent.unmount();
+            this.dismissedVersionsRootComponent = undefined;
         }
     }
 }
