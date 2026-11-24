@@ -170,7 +170,12 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
         const uncheckedIds = allPluginReleases
             .filter((item) => {
                 const review = settings.securityReviewsByPluginId[item.getPluginId()];
-                return !review || review.reviewedVersion !== item.getLatestVersionNumber() || Boolean(review.error);
+                return (
+                    !review ||
+                    review.reviewedVersion !== item.getLatestVersionNumber() ||
+                    Boolean(review.error) ||
+                    review.sourceKind === 'release-notes-only'
+                );
             })
             .map((item) => item.getPluginId());
 
@@ -178,6 +183,18 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
         void dispatch(
             checkAllPluginsSecurityWithJev({
                 pluginIds: uncheckedIds,
+                app,
+                persistPluginSettings,
+            })
+        );
+    }
+
+    function handleRecheckAllWithJev() {
+        const allIds = allPluginReleases.map((item) => item.getPluginId());
+        if (allIds.length === 0) return;
+        void dispatch(
+            checkAllPluginsSecurityWithJev({
+                pluginIds: allIds,
                 app,
                 persistPluginSettings,
             })
@@ -278,6 +295,7 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
             requireApprovalBeforeUpdate={settings.requireApprovalBeforeUpdate}
             onCheckPluginWithJev={handleCheckPluginWithJev}
             onCheckAllWithJev={handleCheckAllWithJev}
+            onRecheckAllWithJev={handleRecheckAllWithJev}
             onTogglePluginApproved={handleTogglePluginApproved}
             onSyncChecklist={handleSyncChecklist}
         />
@@ -303,6 +321,7 @@ export const PluginUpdateList: React.FC<{
     requireApprovalBeforeUpdate?: boolean;
     onCheckPluginWithJev?: (pluginId: string) => void;
     onCheckAllWithJev?: () => void;
+    onRecheckAllWithJev?: () => void;
     onTogglePluginApproved?: (plugin: PluginViewModel, approved: boolean) => void;
     onSyncChecklist?: () => void;
 }> = ({
@@ -324,6 +343,7 @@ export const PluginUpdateList: React.FC<{
     requireApprovalBeforeUpdate = true,
     onCheckPluginWithJev,
     onCheckAllWithJev,
+    onRecheckAllWithJev,
     onTogglePluginApproved,
     onSyncChecklist,
 }) => {
@@ -400,7 +420,8 @@ export const PluginUpdateList: React.FC<{
         return (
             !review ||
             review.reviewedVersion !== plugin.latestInstallableVersionNumber ||
-            Boolean(review.error)
+            Boolean(review.error) ||
+            review.sourceKind === 'release-notes-only'
         );
     }).length;
     const totalEstimatedUsd = plugins.reduce((sum, plugin) => {
@@ -424,6 +445,7 @@ export const PluginUpdateList: React.FC<{
                     syncChecklistEnabled={syncMarkdownChecklist}
                     requireApproval={requireApprovalBeforeUpdate}
                     onCheckAllWithJev={onCheckAllWithJev}
+                    onRecheckAllWithJev={onRecheckAllWithJev || (() => {})}
                     onSyncChecklist={onSyncChecklist || (() => {})}
                 />
             )}

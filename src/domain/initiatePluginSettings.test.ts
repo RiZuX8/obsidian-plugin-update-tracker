@@ -49,6 +49,9 @@ describe('initiatePluginSettings', () => {
 
         expect(settings.daysToSuppressNewUpdates).toBe(3);
         expect(settings.requireApprovalBeforeUpdate).toBe(true);
+        expect(settings.autoCheckUpdatesWithJev).toBe(true);
+        expect(settings.autoApproveLowRiskUpdates).toBe(true);
+        expect(settings.maxAutoApproveRiskScore).toBe(1.5);
         expect(settings.syncMarkdownChecklist).toBe(true);
         expect(settings.securityReviewsByPluginId).toEqual({});
     });

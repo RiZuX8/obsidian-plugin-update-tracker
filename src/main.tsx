@@ -28,10 +28,12 @@ import {
     DEFAULT_CHECKLIST_NOTE_PATH,
     DEFAULT_JEV_ENDPOINT_URL,
     DEFAULT_JEV_MODEL,
+    DEFAULT_MAX_AUTO_APPROVE_RISK_SCORE,
     DEFAULT_PLUGIN_SETTINGS,
     PluginSettings,
 } from './domain/pluginSettings';
 import { RESET_ACTION, store } from './state';
+import { checkAllPluginsSecurityWithJev } from './state/actionProducers/checkPluginSecurity';
 import { cleanupDismissedPluginVersions } from './state/actionProducers/cleanupDismissedPluginVersions';
 import { fetchReleases } from './state/actionProducers/fetchReleases';
 import { syncApp } from './state/actionProducers/syncApp';
@@ -63,6 +65,7 @@ export default class PluginUpdateCheckerPlugin extends Plugin {
     private activeLeafChangeCallback: (leaf: WorkspaceLeaf | null) => any;
     private releasePollingIntervalTimerId: number | undefined;
     private previousFilteredUpdates: string[] = []; // Store previous updates for comparison
+    private autoCheckedVersionsInSession: Set<string> = new Set();
 
     async onload() {
         this.registerView(
@@ -236,6 +239,56 @@ export default class PluginUpdateCheckerPlugin extends Plugin {
                 buttonEl.removeEventListener('click', this.showPluginUpdateManagerView.bind(this));
                 buttonEl.remove();
             }, 15000);
+        }
+    }
+
+    runAutoSecurityChecks() {
+        const state = store.getState();
+        if (
+            !this.settings.autoCheckUpdatesWithJev ||
+            !this.settings.typesafeApiKey.trim() ||
+            state.obsidian.isCheckingAllSecurity
+        ) {
+            return;
+        }
+
+        const filteredUpdates = pluginFilter(
+            {},
+            this.settings,
+            state.obsidian.pluginManifests,
+            state.obsidian.enabledPlugins,
+            state.releases.releases
+        );
+
+        const pluginIdsToCheck = filteredUpdates
+            .filter((update) => {
+                const pluginId = update.getPluginId();
+                const targetVersion = update.getLatestVersionNumber();
+                const sessionKey = `${pluginId}@${targetVersion}`;
+                if (this.autoCheckedVersionsInSession.has(sessionKey)) return false;
+
+                const existing = this.settings.securityReviewsByPluginId[pluginId];
+                const needsCheck =
+                    !existing ||
+                    existing.reviewedVersion !== targetVersion ||
+                    Boolean(existing.error) ||
+                    existing.sourceKind === 'release-notes-only';
+                return needsCheck;
+            })
+            .map((update) => {
+                const sessionKey = `${update.getPluginId()}@${update.getLatestVersionNumber()}`;
+                this.autoCheckedVersionsInSession.add(sessionKey);
+                return update.getPluginId();
+            });
+
+        if (pluginIdsToCheck.length > 0) {
+            void store.dispatch(
+                checkAllPluginsSecurityWithJev({
+                    pluginIds: pluginIdsToCheck,
+                    app: this.app,
+                    persistPluginSettings: (settings) => this.saveSettings(settings),
+                })
+            );
         }
     }
 
@@ -545,9 +598,28 @@ class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName('Auto-approve low-risk Jev checks')
+            .setName('Auto-check new updates with Jev')
             .setDesc(
-                'Automatically mark updates approved when a full GitHub diff is available and Jev returns approve with risk <= 0.75.'
+                'Automatically inspect pending updates (GitHub source + release main.js bundle) when updates are detected.'
+            )
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.autoCheckUpdatesWithJev)
+                    .onChange(async (autoCheckUpdatesWithJev) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            autoCheckUpdatesWithJev,
+                        });
+                        if (autoCheckUpdatesWithJev) {
+                            this.plugin.runAutoSecurityChecks();
+                        }
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Auto-approve safe Jev checks')
+            .setDesc(
+                'Automatically mark updates [x] approved when actual code (source or release main.js) is inspected, Jev recommends approve, there are no bundle tamper warnings, and risk score is within your limit.'
             )
             .addToggle((toggle) =>
                 toggle
@@ -556,6 +628,27 @@ class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
                         await this.plugin.saveSettings({
                             ...this.plugin.settings,
                             autoApproveLowRiskUpdates,
+                        });
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName('Max auto-approve risk score')
+            .setDesc(
+                'Maximum Jev risk score (0.50–2.50 out of 3) allowed for automatic approval when Jev recommends approve.'
+            )
+            .addSlider((slider) =>
+                slider
+                    .setLimits(0.5, 2.5, 0.25)
+                    .setValue(
+                        this.plugin.settings.maxAutoApproveRiskScore ??
+                            DEFAULT_MAX_AUTO_APPROVE_RISK_SCORE
+                    )
+                    .setDynamicTooltip()
+                    .onChange(async (maxAutoApproveRiskScore) => {
+                        await this.plugin.saveSettings({
+                            ...this.plugin.settings,
+                            maxAutoApproveRiskScore,
                         });
                     })
             );

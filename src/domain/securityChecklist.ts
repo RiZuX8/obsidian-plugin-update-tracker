@@ -87,8 +87,14 @@ export function renderSecurityChecklistMarkdown(entries: ChecklistRenderEntry[])
         const netPct = Math.round(r.newNetworkCalls * 100);
         const secPct = Math.round(r.sensitiveLocalAccess * 100);
         const scPct = Math.round(r.supplyChainRisk * 100);
-        const sourceTag = r.sourceKind === 'release-notes-only' ? ' · notes-only' : '';
-        return `- [${box}] \`${entry.pluginId}\` (\`${entry.fromVersion}\` → \`${entry.toVersion}\`) — **${entry.pluginName}** · Jev: \`${r.recommendation}\` (risk \`${r.riskScore.toFixed(2)}/3\`, net \`${netPct}%\`, local \`${secPct}%\`, deps \`${scPct}%\`${sourceTag})${compareLink}`;
+        const sourceTag =
+            r.sourceKind === 'release-notes-only'
+                ? ' · notes-only'
+                : r.sourceKind === 'release-bundle-diff'
+                ? ' · bundle-diff'
+                : '';
+        const tamperTag = r.tamperWarnings && r.tamperWarnings.length > 0 ? ' · ⚠️ TAMPER MISMATCH' : '';
+        return `- [${box}] \`${entry.pluginId}\` (\`${entry.fromVersion}\` → \`${entry.toVersion}\`) — **${entry.pluginName}** · Jev: \`${r.recommendation}\` (risk \`${r.riskScore.toFixed(2)}/3\`, net \`${netPct}%\`, local \`${secPct}%\`, deps \`${scPct}%\`${sourceTag}${tamperTag})${compareLink}`;
     });
 
     return [...header, ...lines, ''].join('\n');

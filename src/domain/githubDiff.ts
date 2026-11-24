@@ -1,4 +1,10 @@
 import { requestUrl } from 'obsidian';
+import { getReleaseAsset } from './api';
+import {
+    analyzeMainJsBundleDiff,
+    BundleDiffAnalysis,
+    detectBundleTamperMismatch,
+} from './bundleDiff';
 import { DiffSourceKind } from './pluginSettings';
 
 export type GithubCompareFile = {
@@ -19,6 +25,7 @@ export type PluginDiffPayload = {
     changedFiles: string[];
     skippedFiles: string[];
     signals: string[];
+    tamperWarnings: string[];
     diffText: string;
     truncated: boolean;
 };
@@ -326,9 +333,26 @@ async function resolveCompareTagsFromReleases(
     return null;
 }
 
+function formatBundleSection(bundle: BundleDiffAnalysis): string {
+    const parts = [
+        `Installed vs release main.js size: ${bundle.oldBytes} -> ${bundle.newBytes} bytes`,
+        bundle.addedHosts.length > 0
+            ? `New hosts in release main.js: ${bundle.addedHosts.join(', ')}`
+            : 'New hosts in release main.js: none',
+        bundle.addedApiSignals.length > 0
+            ? `API count deltas in release main.js: ${bundle.addedApiSignals.join(', ')}`
+            : 'API count deltas in release main.js: none',
+        bundle.addedSnippetsText
+            ? `Added statements in release main.js:\n${bundle.addedSnippetsText}`
+            : 'No new executable statements detected in release main.js.',
+    ];
+    return parts.join('\n');
+}
+
 /**
  * Fetch source changes between `fromVersion` and `toVersion` via GitHub Compare API,
- * falling back to release notes if tags cannot be compared.
+ * and cross-check the shipped release `main.js` asset against the installed `main.js`
+ * so code injected outside git tags or missing tags is still inspected.
  */
 export async function fetchPluginUpdateDiff(params: {
     repoPath: string;
@@ -336,6 +360,8 @@ export async function fetchPluginUpdateDiff(params: {
     toVersion: string;
     githubToken?: string;
     fallbackNotes?: string;
+    mainJsAssetId?: number;
+    installedMainJs?: string | null;
 }): Promise<PluginDiffPayload> {
     const normalizedRepo = parseGithubRepoPath(params.repoPath);
     if (!normalizedRepo) {
@@ -394,6 +420,25 @@ export async function fetchPluginUpdateDiff(params: {
         }
     }
 
+    let bundleAnalysis: BundleDiffAnalysis | undefined;
+    if (params.mainJsAssetId) {
+        try {
+            const assetRes = await getReleaseAsset(
+                params.mainJsAssetId,
+                normalizedRepo,
+                params.githubToken
+            );
+            if (assetRes.success && typeof assetRes.fileContents === 'string') {
+                bundleAnalysis = analyzeMainJsBundleDiff(
+                    params.installedMainJs ?? null,
+                    assetRes.fileContents
+                );
+            }
+        } catch {
+            // Release asset download failed; continue with compare/notes fallback
+        }
+    }
+
     const defaultCompareUrl = `https://github.com/${normalizedRepo}/compare/${params.fromVersion}...${params.toVersion}#files_bucket`;
 
     if (compareData && Array.isArray(compareData.files)) {
@@ -403,24 +448,71 @@ export async function fetchPluginUpdateDiff(params: {
             .slice(0, 25);
 
         const selected = selectRelevantChangedFiles(compareData.files);
+        const sourceDiff = selected.diffText || '[No source file patches available in GitHub compare]';
         const signals = extractSecuritySignalsFromDiff(selected.diffText);
+        const tamperWarnings = bundleAnalysis
+            ? detectBundleTamperMismatch(selected.diffText, bundleAnalysis)
+            : [];
+
+        if (bundleAnalysis) {
+            for (const apiSig of bundleAnalysis.addedApiSignals) {
+                if (!signals.includes(apiSig)) signals.push(`Bundle ${apiSig}`);
+            }
+            if (bundleAnalysis.addedHosts.length > 0) {
+                signals.push(`Bundle new hosts: ${bundleAnalysis.addedHosts.slice(0, 6).join(', ')}`);
+            }
+        }
+
+        const combinedDiffText = bundleAnalysis
+            ? `${sourceDiff}\n\n=== Release main.js bundle cross-check ===\n${formatBundleSection(bundleAnalysis)}`
+            : sourceDiff;
 
         return {
             repoPath: normalizedRepo,
             fromVersion: params.fromVersion,
             toVersion: params.toVersion,
             compareUrl: compareData.html_url || defaultCompareUrl,
-            sourceKind: 'github-compare',
+            sourceKind: bundleAnalysis ? 'github-compare+bundle' : 'github-compare',
             commitMessages,
-            changedFiles: selected.includedFiles,
+            changedFiles: bundleAnalysis
+                ? [...selected.includedFiles, 'release-asset/main.js']
+                : selected.includedFiles,
             skippedFiles: selected.skippedFiles,
-            signals,
-            diffText: selected.diffText || '[No source file patches available in GitHub compare]',
-            truncated: selected.truncated,
+            signals: [...tamperWarnings, ...signals],
+            tamperWarnings,
+            diffText: combinedDiffText,
+            truncated: selected.truncated || Boolean(bundleAnalysis?.truncated),
         };
     }
 
     const fallbackBody = (params.fallbackNotes || '').trim() || 'No release notes provided.';
+    if (bundleAnalysis) {
+        const signals: string[] = [
+            'GitHub source compare tags unavailable; inspected executable release main.js diff directly',
+            ...bundleAnalysis.addedApiSignals.map((sig) => `Bundle ${sig}`),
+        ];
+        if (bundleAnalysis.addedHosts.length > 0) {
+            signals.push(`Bundle new hosts: ${bundleAnalysis.addedHosts.slice(0, 6).join(', ')}`);
+        }
+
+        return {
+            repoPath: normalizedRepo,
+            fromVersion: params.fromVersion,
+            toVersion: params.toVersion,
+            compareUrl: defaultCompareUrl,
+            sourceKind: 'release-bundle-diff',
+            commitMessages: [],
+            changedFiles: ['release-asset/main.js'],
+            skippedFiles: [],
+            signals,
+            tamperWarnings: [],
+            diffText: `=== Release main.js bundle diff (tags unavailable) ===\n${formatBundleSection(
+                bundleAnalysis
+            )}\n\nRelease notes:\n${fallbackBody.slice(0, 3000)}`,
+            truncated: bundleAnalysis.truncated || fallbackBody.length > 3000,
+        };
+    }
+
     return {
         repoPath: normalizedRepo,
         fromVersion: params.fromVersion,
@@ -430,7 +522,8 @@ export async function fetchPluginUpdateDiff(params: {
         commitMessages: [],
         changedFiles: [],
         skippedFiles: [],
-        signals: ['Source code diff unavailable on GitHub (matching release tags not found)'],
+        signals: ['Source code diff and release main.js unavailable'],
+        tamperWarnings: [],
         diffText: `Source code diff unavailable between ${params.fromVersion} and ${params.toVersion}.\nRelease notes:\n${fallbackBody.slice(0, 8000)}`,
         truncated: fallbackBody.length > 8000,
     };

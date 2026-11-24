@@ -16,6 +16,7 @@ const SAMPLE_DIFF: PluginDiffPayload = {
     changedFiles: ['styles.css'],
     skippedFiles: [],
     signals: [],
+    tamperWarnings: [],
     diffText: '--- styles.css ---\n+color: var(--text-normal);',
     truncated: false,
 };
@@ -52,8 +53,8 @@ describe('jevSecurityCheck', () => {
         expect(review.estimatedUsd).toBeCloseTo(0.000042, 8);
     });
 
-    it('never auto-approves when only release notes were available', () => {
-        const review = parseSystemOneResponse(
+    it('never auto-approves when only release notes were available or tamper warnings exist', () => {
+        const notesOnly = parseSystemOneResponse(
             JSON.stringify({
                 answers: {
                     new_network_calls: { type: 'noul', noul: 0.02 },
@@ -71,7 +72,54 @@ describe('jevSecurityCheck', () => {
             }
         );
 
-        expect(review.approved).toBe(false);
+        expect(notesOnly.approved).toBe(false);
+
+        const tampered = parseSystemOneResponse(
+            JSON.stringify({
+                answers: {
+                    new_network_calls: { type: 'noul', noul: 0.02 },
+                    sensitive_local_access: { type: 'noul', noul: 0.01 },
+                    supply_chain_risk: { type: 'noul', noul: 0.01 },
+                    risk_score: { type: 'score', score: 0.1, confidence: 0.9 },
+                    recommendation: { type: 'choice', choice: 'approve', confidence: 0.9 },
+                },
+                usage: { input_tokens: 200 },
+            }),
+            {
+                pluginId: 'sample-plugin',
+                diff: {
+                    ...SAMPLE_DIFF,
+                    sourceKind: 'github-compare+bundle',
+                    tamperWarnings: ['Release main.js introduces external host "evil.test"'],
+                },
+                autoApproveLowRiskUpdates: true,
+            }
+        );
+
+        expect(tampered.approved).toBe(false);
+    });
+
+    it('auto-approves release-bundle-diff when within risk score threshold', () => {
+        const review = parseSystemOneResponse(
+            JSON.stringify({
+                answers: {
+                    new_network_calls: { type: 'noul', noul: 0.08 },
+                    sensitive_local_access: { type: 'noul', noul: 0.07 },
+                    supply_chain_risk: { type: 'noul', noul: 0.05 },
+                    risk_score: { type: 'score', score: 1.1, confidence: 0.85 },
+                    recommendation: { type: 'choice', choice: 'approve', confidence: 0.9 },
+                },
+                usage: { input_tokens: 450 },
+            }),
+            {
+                pluginId: 'bases-lock',
+                diff: { ...SAMPLE_DIFF, sourceKind: 'release-bundle-diff' },
+                autoApproveLowRiskUpdates: true,
+                maxAutoApproveRiskScore: 1.5,
+            }
+        );
+
+        expect(review.approved).toBe(true);
     });
 
     it('calls TypeSafe System One via requestUrl with Bearer header', async () => {

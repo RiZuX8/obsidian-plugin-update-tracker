@@ -1,5 +1,5 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
-import { App, Notice } from 'obsidian';
+import { App, normalizePath, Notice } from 'obsidian';
 import { State } from '..';
 import { fetchPluginUpdateDiff } from '../../domain/githubDiff';
 import { evaluatePluginDiffWithJev } from '../../domain/jevSecurityCheck';
@@ -11,6 +11,19 @@ type BaseSecurityParams = {
     app: App;
     persistPluginSettings: (settings: PluginSettings) => Promise<void>;
 };
+
+async function readInstalledMainJs(app: App, pluginId: string): Promise<string | null> {
+    try {
+        const configDir = normalizePath(app.vault.configDir);
+        const mainJsPath = `${configDir}/plugins/${pluginId}/main.js`;
+        if (await app.vault.adapter.exists(mainJsPath)) {
+            return await app.vault.adapter.read(mainJsPath);
+        }
+    } catch {
+        // Ignore read error and proceed with null baseline
+    }
+    return null;
+}
 
 function getFilteredUpdateById(state: State, pluginId: string) {
     const filtered = pluginFilter(
@@ -40,6 +53,7 @@ export const checkPluginSecurityWithJev = createAsyncThunk(
         const repoPath = target.getRepoPath() || target.getPluginRepositoryUrl();
         const fromVersion = target.getInstalledVersionNumber();
         const toVersion = target.getLatestVersionNumber();
+        const mainJsAssetId = target.getReleaseAssetIdsForVersion(toVersion)?.mainJs;
         const fallbackNotes = target
             .getReleaseVersions()
             .map((v) => `## ${v.versionName}\n${v.notes}`)
@@ -47,12 +61,15 @@ export const checkPluginSecurityWithJev = createAsyncThunk(
 
         let review: PluginSecurityReview;
         try {
+            const installedMainJs = await readInstalledMainJs(params.app, params.pluginId);
             const diff = await fetchPluginUpdateDiff({
                 repoPath,
                 fromVersion,
                 toVersion,
                 githubToken: settings.githubToken,
                 fallbackNotes,
+                mainJsAssetId,
+                installedMainJs,
             });
 
             review = await evaluatePluginDiffWithJev({
@@ -63,6 +80,7 @@ export const checkPluginSecurityWithJev = createAsyncThunk(
                 pluginName: target.getPluginName(),
                 diff,
                 autoApproveLowRiskUpdates: settings.autoApproveLowRiskUpdates,
+                maxAutoApproveRiskScore: settings.maxAutoApproveRiskScore,
             });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);

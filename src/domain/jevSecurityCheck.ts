@@ -3,6 +3,7 @@ import { PluginDiffPayload } from './githubDiff';
 import {
     DEFAULT_JEV_ENDPOINT_URL,
     DEFAULT_JEV_MODEL,
+    DEFAULT_MAX_AUTO_APPROVE_RISK_SCORE,
     JevRecommendation,
     PluginSecurityReview,
 } from './pluginSettings';
@@ -54,6 +55,10 @@ export function buildJevDiffState(
             : '';
     const signalsBlock =
         diff.signals.length > 0 ? `Static diff markers:\n- ${diff.signals.join('\n- ')}\n\n` : '';
+    const tamperBlock =
+        diff.tamperWarnings.length > 0
+            ? `ALERT — Source vs release main.js mismatches:\n- ${diff.tamperWarnings.join('\n- ')}\n\n`
+            : '';
     const filesBlock =
         diff.changedFiles.length > 0
             ? `Included files (${diff.changedFiles.length}): ${diff.changedFiles.join(', ')}\n`
@@ -70,7 +75,7 @@ export function buildJevDiffState(
         `Version change: ${diff.fromVersion} -> ${diff.toVersion}`,
         `Diff source: ${diff.sourceKind}${diff.truncated ? ' (truncated)' : ''}`,
         filesBlock + skippedBlock,
-        commitsBlock + signalsBlock + `Code diff / context:\n${diff.diffText}`,
+        tamperBlock + commitsBlock + signalsBlock + `Code diff / context:\n${diff.diffText}`,
     ]
         .filter(Boolean)
         .join('\n');
@@ -85,6 +90,7 @@ export function parseSystemOneResponse(
         pluginId: string;
         diff: PluginDiffPayload;
         autoApproveLowRiskUpdates: boolean;
+        maxAutoApproveRiskScore?: number;
         reviewedAt?: string;
     }
 ): PluginSecurityReview {
@@ -117,12 +123,13 @@ export function parseSystemOneResponse(
             : 0;
     const estimatedUsd = (inputTokens * USD_PER_MILLION_INPUT_TOKENS) / 1_000_000;
 
-    // Only allow auto-approval when source code diff was actually inspected and Jev approves with low risk.
+    const maxScore = meta.maxAutoApproveRiskScore ?? DEFAULT_MAX_AUTO_APPROVE_RISK_SCORE;
     const canAutoApprove =
         meta.autoApproveLowRiskUpdates &&
-        meta.diff.sourceKind === 'github-compare' &&
+        meta.diff.sourceKind !== 'release-notes-only' &&
+        meta.diff.tamperWarnings.length === 0 &&
         recommendation === 'approve' &&
-        riskScore <= 0.75;
+        riskScore <= maxScore;
 
     return {
         pluginId: meta.pluginId,
@@ -143,6 +150,7 @@ export function parseSystemOneResponse(
         compareUrl: meta.diff.compareUrl,
         changedFiles: meta.diff.changedFiles,
         signals: meta.diff.signals,
+        tamperWarnings: meta.diff.tamperWarnings,
         reviewedAt: meta.reviewedAt || new Date().toISOString(),
     };
 }
@@ -158,6 +166,7 @@ export async function evaluatePluginDiffWithJev(params: {
     pluginName: string;
     diff: PluginDiffPayload;
     autoApproveLowRiskUpdates: boolean;
+    maxAutoApproveRiskScore?: number;
 }): Promise<PluginSecurityReview> {
     const apiKey = params.apiKey.trim();
     if (!apiKey) {
@@ -203,11 +212,11 @@ export async function evaluatePluginDiffWithJev(params: {
                     'What action should the user take for this Obsidian plugin update?',
                 criteria: {
                     approve:
-                        'Source diff is available and shows safe, expected maintenance or minor changes with no suspicious endpoints or secret access',
+                        'Actual code diff (GitHub source and/or release main.js diff) was inspected and shows safe, expected changes with no hidden bundle tampering or suspicious secret/network access',
                     review:
-                        'Source diff is missing/truncated or introduces new endpoints, dependencies, or local file/process access worth inspecting first',
+                        'Code diff is missing entirely (notes-only), shows source-vs-bundle mismatch warnings, or introduces new endpoints, dependencies, or broad local access worth checking',
                     block:
-                        'Shows signs of exfiltration, unauthorized note/env reading, hidden telemetry, or dangerous code execution',
+                        'Shows signs of exfiltration, bundle tampering outside git source, unauthorized note/env reading, hidden telemetry, or dangerous code execution',
                 },
             },
         },
@@ -242,5 +251,6 @@ export async function evaluatePluginDiffWithJev(params: {
         pluginId: params.pluginId,
         diff: params.diff,
         autoApproveLowRiskUpdates: params.autoApproveLowRiskUpdates,
+        maxAutoApproveRiskScore: params.maxAutoApproveRiskScore,
     });
 }

@@ -11,6 +11,7 @@ interface SecurityChecklistToolbarProps {
     syncChecklistEnabled: boolean;
     requireApproval: boolean;
     onCheckAllWithJev: () => void;
+    onRecheckAllWithJev: () => void;
     onSyncChecklist: () => void;
 }
 
@@ -24,6 +25,7 @@ export const SecurityChecklistToolbar: React.FC<SecurityChecklistToolbarProps> =
     syncChecklistEnabled,
     requireApproval,
     onCheckAllWithJev,
+    onRecheckAllWithJev,
     onSyncChecklist,
 }) => {
     const costLabel =
@@ -59,6 +61,14 @@ export const SecurityChecklistToolbar: React.FC<SecurityChecklistToolbarProps> =
                         Sync checklist
                     </button>
                 )}
+                <button
+                    type="button"
+                    className="oput-security-btn"
+                    onClick={onRecheckAllWithJev}
+                    disabled={isCheckingAll || totalPlugins === 0}
+                >
+                    Re-check all
+                </button>
                 <button
                     type="button"
                     className="oput-security-btn mod-cta"
@@ -228,10 +238,23 @@ export const PluginSecurityPanel: React.FC<PluginSecurityPanelProps> = ({
 
             {matching?.error && <div className="oput-security-error">{matching.error}</div>}
 
+            {matching?.tamperWarnings && matching.tamperWarnings.length > 0 && (
+                <div className="oput-security-error">
+                    <strong>Supply-chain mismatch:</strong> {matching.tamperWarnings.join(' · ')}
+                </div>
+            )}
+
+            {matching && matching.sourceKind === 'release-bundle-diff' && !matching.error && (
+                <div className="oput-security-signals">
+                    GitHub source tags unavailable — inspected executable release main.js diff
+                    directly.
+                </div>
+            )}
+
             {matching && matching.sourceKind === 'release-notes-only' && !matching.error && (
                 <div className="oput-security-signals">
-                    Note: GitHub source compare tags were unavailable; Jev inspected release notes
-                    only.
+                    Note: Neither GitHub compare tags nor release main.js could be fetched; Jev
+                    inspected release notes only.
                 </div>
             )}
 

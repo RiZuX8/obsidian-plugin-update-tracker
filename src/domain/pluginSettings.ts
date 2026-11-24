@@ -1,6 +1,10 @@
 export type JevRecommendation = 'approve' | 'review' | 'block';
 
-export type DiffSourceKind = 'github-compare' | 'release-notes-only';
+export type DiffSourceKind =
+    | 'github-compare+bundle'
+    | 'github-compare'
+    | 'release-bundle-diff'
+    | 'release-notes-only';
 
 export type PluginSecurityReview = {
     pluginId: string;
@@ -21,6 +25,7 @@ export type PluginSecurityReview = {
     compareUrl: string;
     changedFiles: string[];
     signals: string[];
+    tamperWarnings?: string[];
     reviewedAt: string;
     error?: string;
 };
@@ -41,7 +46,9 @@ export type PluginSettings = {
     jevModel: string;
     githubToken: string;
     requireApprovalBeforeUpdate: boolean;
+    autoCheckUpdatesWithJev: boolean;
     autoApproveLowRiskUpdates: boolean;
+    maxAutoApproveRiskScore: number;
     syncMarkdownChecklist: boolean;
     checklistNotePath: string;
     securityReviewsByPluginId: Record<string, PluginSecurityReview>;
@@ -63,6 +70,8 @@ export const DEFAULT_JEV_ENDPOINT_URL = 'https://api.typesafe.ai/v1/systemone';
 export const DEFAULT_JEV_MODEL = 'jev-1.14.0';
 export const DEFAULT_CHECKLIST_NOTE_PATH = 'Plugin Update Security Checklist.md';
 
+export const DEFAULT_MAX_AUTO_APPROVE_RISK_SCORE = 1.5;
+
 export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
     daysToSuppressNewUpdates: 0,
     dismissedVersionsByPluginId: {},
@@ -77,7 +86,9 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
     jevModel: DEFAULT_JEV_MODEL,
     githubToken: '',
     requireApprovalBeforeUpdate: true,
-    autoApproveLowRiskUpdates: false,
+    autoCheckUpdatesWithJev: true,
+    autoApproveLowRiskUpdates: true,
+    maxAutoApproveRiskScore: DEFAULT_MAX_AUTO_APPROVE_RISK_SCORE,
     syncMarkdownChecklist: true,
     checklistNotePath: DEFAULT_CHECKLIST_NOTE_PATH,
     securityReviewsByPluginId: {},

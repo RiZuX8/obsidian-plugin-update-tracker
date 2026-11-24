@@ -16,6 +16,7 @@ export const showUpdateNotificationMiddleware = () => (next: any) => (action: an
         if (plugin) {
             // Bind the method to preserve the this context
             plugin.showNotificationOnNewUpdate.bind(plugin)();
+            plugin.runAutoSecurityChecks.bind(plugin)();
         }
     }
 

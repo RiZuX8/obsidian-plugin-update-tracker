@@ -25,12 +25,19 @@ export const getReleases: ReleaseApi = async (newPluginVersionRequest: NewPlugin
 
 export const getReleaseAsset = async (
     assetId: number,
-    githubRepo: string
+    githubRepo: string,
+    githubToken?: string
 ): Promise<{ success: boolean; fileContents?: string; rateLimitResetTimestamp?: number }> => {
+    const headers: Record<string, string> = { Accept: 'application/octet-stream' };
+    const token = githubToken?.trim();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await requestUrl({
         url: `https://api.github.com/repos/${githubRepo}/releases/assets/${assetId}`,
         method: 'GET',
-        headers: { Accept: 'application/octet-stream' },
+        headers,
         throw: false,
     });
 
