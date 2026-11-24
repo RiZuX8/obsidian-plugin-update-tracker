@@ -13,6 +13,7 @@ interface SecurityChecklistToolbarProps {
     onCheckAllWithJev: () => void;
     onRecheckAllWithJev: () => void;
     onSyncChecklist: () => void;
+    onOpenChecklist: () => void;
 }
 
 export const SecurityChecklistToolbar: React.FC<SecurityChecklistToolbarProps> = ({
@@ -27,6 +28,7 @@ export const SecurityChecklistToolbar: React.FC<SecurityChecklistToolbarProps> =
     onCheckAllWithJev,
     onRecheckAllWithJev,
     onSyncChecklist,
+    onOpenChecklist,
 }) => {
     const costLabel =
         totalEstimatedUsd > 0 ? ` · Jev cost: ~$${totalEstimatedUsd.toFixed(5)}` : '';
@@ -51,6 +53,13 @@ export const SecurityChecklistToolbar: React.FC<SecurityChecklistToolbarProps> =
             </div>
 
             <div className="oput-security-toolbar-actions">
+                <button
+                    type="button"
+                    className="oput-security-btn"
+                    onClick={onOpenChecklist}
+                >
+                    Open checklist
+                </button>
                 {syncChecklistEnabled && (
                     <button
                         type="button"

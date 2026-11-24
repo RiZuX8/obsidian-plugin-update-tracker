@@ -1,6 +1,6 @@
-import { App, normalizePath, TFile } from 'obsidian';
+import { App, normalizePath, Platform, TFile } from 'obsidian';
 import InstalledPluginReleases from './InstalledPluginReleases';
-import { PluginSecurityReview } from './pluginSettings';
+import { DEFAULT_CHECKLIST_NOTE_PATH, PluginSecurityReview } from './pluginSettings';
 
 export type ParsedChecklistItem = {
     pluginId: string;
@@ -236,4 +236,33 @@ export async function syncSecurityChecklistNoteInVault(params: {
     }
 
     return mergedReviews;
+}
+
+/**
+ * Open the security checklist note in Obsidian, creating it first if missing.
+ */
+export async function openSecurityChecklistNoteInVault(params: {
+    app: App;
+    notePath: string;
+    updates: InstalledPluginReleases[];
+    reviews: Record<string, PluginSecurityReview>;
+}): Promise<void> {
+    const normalizedPath = normalizePath(params.notePath.trim() || DEFAULT_CHECKLIST_NOTE_PATH);
+    if (isProtectedDiaryPath(normalizedPath)) {
+        throw new Error('Checklist note path cannot target the Diary folder.');
+    }
+
+    let abstractFile = params.app.vault.getAbstractFileByPath(normalizedPath);
+    if (!abstractFile) {
+        await syncSecurityChecklistNoteInVault(params);
+        abstractFile = params.app.vault.getAbstractFileByPath(normalizedPath);
+    }
+
+    if (!(abstractFile instanceof TFile)) {
+        throw new Error(`Could not open checklist note at "${normalizedPath}".`);
+    }
+
+    const leaf = params.app.workspace.getLeaf(Platform.isMobile ? false : 'tab');
+    await leaf.openFile(abstractFile);
+    params.app.workspace.revealLeaf(leaf);
 }

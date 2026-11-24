@@ -32,6 +32,7 @@ import {
     DEFAULT_PLUGIN_SETTINGS,
     PluginSettings,
 } from './domain/pluginSettings';
+import { openSecurityChecklistNoteInVault } from './domain/securityChecklist';
 import { RESET_ACTION, store } from './state';
 import { checkAllPluginsSecurityWithJev } from './state/actionProducers/checkPluginSecurity';
 import { cleanupDismissedPluginVersions } from './state/actionProducers/cleanupDismissedPluginVersions';
@@ -692,7 +693,31 @@ class PluginUpdateCheckerSettingsTab extends PluginSettingTab {
                 }
 
                 text.onChange(savePath);
-            });
+            })
+            .addExtraButton((button) =>
+                button
+                    .setIcon('file-text')
+                    .setTooltip('Open checklist note')
+                    .onClick(() => {
+                        const state = store.getState();
+                        const updates = pluginFilter(
+                            {},
+                            this.plugin.settings,
+                            state.obsidian.pluginManifests,
+                            state.obsidian.enabledPlugins,
+                            state.releases.releases
+                        );
+                        void openSecurityChecklistNoteInVault({
+                            app: this.app,
+                            notePath: this.plugin.settings.checklistNotePath,
+                            updates,
+                            reviews: this.plugin.settings.securityReviewsByPluginId,
+                        }).catch((err) => {
+                            const msg = err instanceof Error ? err.message : String(err);
+                            new Notice(`Could not open checklist: ${msg}`);
+                        });
+                    })
+            );
 
         const currentJevModel = this.plugin.settings.jevModel || DEFAULT_JEV_MODEL;
         const isPresetModel = PRESET_JEV_MODELS.includes(

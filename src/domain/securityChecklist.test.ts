@@ -1,13 +1,15 @@
 jest.mock('obsidian', () => ({
     normalizePath: (p: string) => p,
+    Platform: { isMobile: false },
     TFile: class TFile {},
 }));
 
-import { PluginManifest } from 'obsidian';
+import { App, PluginManifest, TFile } from 'obsidian';
 import InstalledPluginReleases from './InstalledPluginReleases';
 import { PluginSecurityReview } from './pluginSettings';
 import {
     mergeChecklistApprovals,
+    openSecurityChecklistNoteInVault,
     parseSecurityChecklistMarkdown,
     renderSecurityChecklistMarkdown,
 } from './securityChecklist';
@@ -135,5 +137,40 @@ describe('securityChecklist', () => {
 
         expect(merged['dataview'].approved).toBe(true);
         expect(merged['dataview'].approvedManually).toBe(true);
+    });
+
+    it('creates and opens the checklist note when missing in the vault', async () => {
+        const createdFile = new (TFile as any)();
+        let storedFile: any = null;
+        const openFile = jest.fn().mockResolvedValue(undefined);
+        const revealLeaf = jest.fn();
+        const getLeaf = jest.fn().mockReturnValue({ openFile });
+        const create = jest.fn().mockImplementation(async () => {
+            storedFile = createdFile;
+            return createdFile;
+        });
+
+        const app = {
+            vault: {
+                getAbstractFileByPath: () => storedFile,
+                create,
+            },
+            workspace: {
+                getLeaf,
+                revealLeaf,
+            },
+        } as unknown as App;
+
+        await openSecurityChecklistNoteInVault({
+            app,
+            notePath: 'Vault/Plugin Update Security Checklist.md',
+            updates: [],
+            reviews: {},
+        });
+
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(getLeaf).toHaveBeenCalledWith('tab');
+        expect(openFile).toHaveBeenCalledWith(createdFile);
+        expect(revealLeaf).toHaveBeenCalled();
     });
 });

@@ -18,6 +18,7 @@ import { visit } from 'unist-util-visit';
 import InstalledPluginReleases from '../domain/InstalledPluginReleases';
 import { PluginSecurityReview, PluginSettings } from '../domain/pluginSettings';
 import enrichReleaseNotes from '../domain/releaseNoteEnricher';
+import { openSecurityChecklistNoteInVault } from '../domain/securityChecklist';
 import { groupById } from '../domain/util/groupById';
 import { useAppDispatch, useAppSelector } from '../state';
 import {
@@ -232,6 +233,18 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
         });
     }
 
+    function handleOpenChecklist() {
+        void openSecurityChecklistNoteInVault({
+            app,
+            notePath: settings.checklistNotePath,
+            updates: allPluginReleases,
+            reviews: settings.securityReviewsByPluginId,
+        }).catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            new Notice(`Could not open checklist: ${msg}`);
+        });
+    }
+
     async function handleDismissPluginVersions(): Promise<void> {
         const installedById = groupById(allPluginReleases, (release) => release.getPluginId());
         const selectedPluginVersions: PluginVersionsToDismiss = selectedPluginsById.map(
@@ -298,6 +311,7 @@ const PluginUpdateListConnected: React.FC<PluginUpdateListProps> = ({
             onRecheckAllWithJev={handleRecheckAllWithJev}
             onTogglePluginApproved={handleTogglePluginApproved}
             onSyncChecklist={handleSyncChecklist}
+            onOpenChecklist={handleOpenChecklist}
         />
     );
 };
@@ -324,6 +338,7 @@ export const PluginUpdateList: React.FC<{
     onRecheckAllWithJev?: () => void;
     onTogglePluginApproved?: (plugin: PluginViewModel, approved: boolean) => void;
     onSyncChecklist?: () => void;
+    onOpenChecklist?: () => void;
 }> = ({
     plugins,
     isInitiallyExpanded,
@@ -346,6 +361,7 @@ export const PluginUpdateList: React.FC<{
     onRecheckAllWithJev,
     onTogglePluginApproved,
     onSyncChecklist,
+    onOpenChecklist,
 }) => {
     /**
      * Keeps track of latest update time of each plugin, remembering the update time of versions that are dismissed.
@@ -447,6 +463,7 @@ export const PluginUpdateList: React.FC<{
                     onCheckAllWithJev={onCheckAllWithJev}
                     onRecheckAllWithJev={onRecheckAllWithJev || (() => {})}
                     onSyncChecklist={onSyncChecklist || (() => {})}
+                    onOpenChecklist={onOpenChecklist || (() => {})}
                 />
             )}
             {plugins.length > 1 && (
